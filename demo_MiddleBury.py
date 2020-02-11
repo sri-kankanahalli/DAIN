@@ -33,7 +33,7 @@ model = networks.__dict__[args.netName](channel=args.channels,
 if args.use_cuda:
     model = model.cuda()
 
-args.SAVED_MODEL = './model_weights/best.pth'
+args.SAVED_MODEL = './model_weights/pretrained.pth'
 if os.path.exists(args.SAVED_MODEL):
     print("The testing model weight is: " + args.SAVED_MODEL)
     if not args.use_cuda:

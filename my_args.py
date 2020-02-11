@@ -6,7 +6,7 @@ import networks
 import  torch
 modelnames =  networks.__all__
 # import datasets
-datasetNames = ('Vimeo_90K_interp') #datasets.__all__
+datasetNames = ('Vimeo_90K_interp', 'pixel_triplets') #datasets.__all__
 
 parser = argparse.ArgumentParser(description='DAIN')
 
@@ -16,7 +16,7 @@ parser.add_argument('--netName', type=str, default='DAIN',
                         ' | '.join(modelnames) +
                         ' (default: DAIN)')
 
-parser.add_argument('--datasetName', default='Vimeo_90K_interp',
+parser.add_argument('--datasetName', default='pixel_triplets',
                     choices= datasetNames,nargs='+',
                     help='dataset type : ' +
                         ' | '.join(datasetNames) +

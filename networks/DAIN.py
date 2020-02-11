@@ -18,7 +18,8 @@ class DAIN(torch.nn.Module):
                  channel = 3,
                  filter_size = 4,
                  timestep=0.5,
-                 training=True):
+                 training=True,
+                 pixel_model=False):
 
         # base class initialization
         super(DAIN, self).__init__()
@@ -26,6 +27,7 @@ class DAIN(torch.nn.Module):
         self.filter_size = filter_size
         self.training = training
         self.timestep = timestep
+        self.pixel_model = pixel_model
         assert (timestep == 0.5) # TODO: or else the WeigtedFlowProjection should also be revised... Really Tedious work.
         self.numFrames =int(1.0/timestep) - 1
 
@@ -186,6 +188,9 @@ class DAIN(torch.nn.Module):
         '''
             STEP 4: return the results
         '''
+        if (self.pixel_model):
+            return cur_output_rectified
+
         if self.training == True:
             # if in the training phase, we output the losses to be minimized.
             # return losses, loss_occlusion

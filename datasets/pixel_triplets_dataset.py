@@ -7,18 +7,19 @@ from math import floor
 import numpy as np
 from .listdatasets import ListDataset
 
-CANVAS_WIDTH = 384
-CANVAS_HEIGHT = 256
-CANVAS_BORDERS = 8
-BACKGROUND_COLOR = (255, 0, 255)
+CANVAS_WIDTH = 192
+CANVAS_HEIGHT = 128
+BACKGROUND_COLOR = (255, 255, 255)
 
-def load_text_file(root, fname):
+def load_text_file(root, fname, shuffle = True):
     text_path = os.path.join(root, fname)
     raw_im_list = open(text_path).read().splitlines()
 
     assert len(raw_im_list) > 0
 
-    random.shuffle(raw_im_list)
+    if (shuffle):
+        random.shuffle(raw_im_list)
+
     return raw_im_list
 
 def pixel_triplets(root, split = 1.0, single = False, task = 'interp'):
@@ -55,25 +56,21 @@ def pixel_triplets_loader(root, im_path, data_aug = True):
         im_mid    = combined_im.crop((imwidth, 0, imwidth * 2, imheight))
         im_after   = combined_im.crop((imwidth * 2, 0, imwidth * 3, imheight))
 
+        '''
         if (data_aug):
+            # flip image horizontally
             if (random.randint(0, 1)):
                 im_before = im_before.transpose(Image.FLIP_LEFT_RIGHT)
                 im_mid = im_mid.transpose(Image.FLIP_LEFT_RIGHT)
                 im_after = im_after.transpose(Image.FLIP_LEFT_RIGHT)
+        '''
 
         # --------------------------------------------
         #  nearest-neighbor upscale + pad to the correct canvas size
         # --------------------------------------------
-        canvas_width_ef = CANVAS_WIDTH - CANVAS_BORDERS * 2
-        canvas_height_ef = CANVAS_HEIGHT - CANVAS_BORDERS * 2
-
-        max_horiz_scale = floor(canvas_width_ef / float(imwidth))
-        max_vert_scale  = floor(canvas_height_ef / float(imheight))
-        scale = int(min(max_horiz_scale, max_vert_scale))
-
-        im_before = scale_image_to_canvas(im_before, scale)
-        im_mid    = scale_image_to_canvas(im_mid, scale)
-        im_after  = scale_image_to_canvas(im_after, scale)
+        im_before = scale_image_to_canvas(im_before, 1)
+        im_mid    = scale_image_to_canvas(im_mid, 1)
+        im_after  = scale_image_to_canvas(im_after, 1)
 
         # --------------------------------------------
         #  finally, do all the technical Numpy conversion shit
@@ -82,9 +79,20 @@ def pixel_triplets_loader(root, im_path, data_aug = True):
         X2 = np.asarray(im_after).transpose((2, 0, 1))
         y  = np.asarray(im_mid).transpose((2, 0, 1))
 
+        #X0[(X0 == (255, 0, 255)).all(axis = -1)] = (255, 255, 255)
+        #X2[(X2 == (255, 0, 255)).all(axis = -1)] = (255, 255, 255)
+        #y[(y == (255, 0, 255)).all(axis = -1)] = (255, 255, 255)
+
         X0 = X0.astype('float32') / 255.0
         X2 = X2.astype('float32') / 255.0
         y  =  y.astype('float32') / 255.0
+
+        if (data_aug):
+            # reverse order of triplets
+            if (random.randint(0, 1)):
+                tmp = X2
+                X2 = X0
+                X0 = tmp
 
         return X0, X2, y
 

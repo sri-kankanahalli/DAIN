@@ -16,7 +16,7 @@ parser.add_argument('--netName', type=str, default='DAIN',
                         ' | '.join(modelnames) +
                         ' (default: DAIN)')
 
-parser.add_argument('--datasetName', default='pixel_triplets',
+parser.add_argument('--datasetName', default='Vimeo_90K_interp',
                     choices= datasetNames,nargs='+',
                     help='dataset type : ' +
                         ' | '.join(datasetNames) +

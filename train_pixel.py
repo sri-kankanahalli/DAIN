@@ -15,7 +15,10 @@ from loss_function import *
 import datasets
 import balancedsampler
 import networks
+import numpy as np
 from my_args import args, unique_id
+
+
 
 class Discriminator(nn.Module):
     class ResidualBlock(nn.Module):
@@ -24,14 +27,14 @@ class Discriminator(nn.Module):
 
             self.downsample = downsample
 
-            self.conv1 = nn.Conv2d(nchans, nchans, kernel_size = 5, padding = 2)
+            self.conv1 = nn.Conv2d(nchans, nchans, kernel_size = 3, padding = 1)
             self.relu = nn.LeakyReLU(0.3, inplace = True)
 
             if (self.downsample):
-                self.conv2 = nn.Conv2d(nchans, nchans, kernel_size = 5, padding = 2, stride = 2)
-                self.dconv = nn.Conv2d(nchans, nchans, kernel_size = 5, padding = 2, stride = 2)
+                self.conv2 = nn.Conv2d(nchans, nchans, kernel_size = 3, padding = 1, stride = 2)
+                self.dconv = nn.Conv2d(nchans, nchans, kernel_size = 3, padding = 1, stride = 2)
             else:
-                self.conv2 = nn.Conv2d(nchans, nchans, kernel_size = 5, padding = 2)
+                self.conv2 = nn.Conv2d(nchans, nchans, kernel_size = 3, padding = 1)
 
         def forward(self, x):
             residual = x
@@ -51,7 +54,7 @@ class Discriminator(nn.Module):
         super(Discriminator, self).__init__()
 
         # number of starting feature maps
-        ndf = 32
+        ndf = 16
 
         '''
         nn.Conv2d(ndf, ndf, kernel_size = 3, padding = 1, stride = 2),
@@ -71,13 +74,13 @@ class Discriminator(nn.Module):
         '''
 
         self.main = nn.Sequential(
-            # input  = 9 x 192 x 128
-            nn.Conv2d(3, ndf, kernel_size = 5, padding = 2),
+            # input  = 6 x 192 x 128 (two images smushed together)
+            nn.Conv2d(6, ndf, kernel_size = 5, padding = 2),
             nn.LeakyReLU(0.3, inplace = True),
             # output = (ndf) x 192 x 128
 
-            Discriminator.ResidualBlock(ndf, downsample = False),
-            Discriminator.ResidualBlock(ndf, downsample = False),
+            #Discriminator.ResidualBlock(ndf, downsample = False),
+            #Discriminator.ResidualBlock(ndf, downsample = False),
             Discriminator.ResidualBlock(ndf, downsample = False),
             Discriminator.ResidualBlock(ndf, downsample = False),
 
@@ -98,8 +101,8 @@ class Discriminator(nn.Module):
             nn.Flatten(),
             # output = (ndf)
 
-            nn.Linear(ndf, 1),
-            nn.Sigmoid()
+            nn.Linear(ndf, 1)
+            # sigmoid is taken care of by loss function
         )
 
         # weight initialization function
@@ -123,6 +126,7 @@ def train():
     BATCH_SIZE = 1
 
     torch.manual_seed(1337)
+    random.seed(1337)
 
     # -------------------------------------
     #  load pre-trained model
@@ -155,7 +159,6 @@ def train():
 
     # discriminator optimizer and loss
     optimizer_discrim = torch.optim.Adam(discrim.parameters(), lr = 0.001)
-    bce_loss = torch.nn.BCELoss()
 
     # -------------------------------------
     #  create dataset loaders
@@ -234,10 +237,6 @@ def train():
     # -------------------------------------
     #  and heeere we go
     # -------------------------------------
-
-    # discriminator pretrains for a certain # of epochs
-    PRETRAINING_EPOCHS = 0
-
     training_losses = AverageMeter()
     auxiliary_data = []
     saved_total_loss = 10e10
@@ -254,11 +253,6 @@ def train():
 
     for t in range(args.numEpoch):
         print("The id of this in-training network is " + unique_id)
-
-        if (t < PRETRAINING_EPOCHS):
-            print("-- Discriminator pre-training epoch --")
-        elif (t == PRETRAINING_EPOCHS):
-            print("-- End discriminator pre-training --")
 
         #Turn into training mode
         model = model.train()
@@ -285,46 +279,58 @@ def train():
             discrim_loss = torch.zeros(1,)
             total_loss = torch.zeros(1,)
 
-            # first few epochs are discriminator pre-training
-            if (t >= PRETRAINING_EPOCHS):
-                optimizer.zero_grad()
+            optimizer.zero_grad()
 
-                # comment out cycle stuff for now
-                #X0_y = model(torch.stack((X0, y, y), dim = 0))
-                #y_X1 = model(torch.stack((y, X1, X1), dim = 0))
-                #y_est = model(torch.stack((X0_y, y, y_X1), dim = 0))
+            # comment out cycle stuff for now
+            #X0_y = model(torch.stack((X0, y, y), dim = 0))
+            #y_X1 = model(torch.stack((y, X1, X1), dim = 0))
+            #y_est = model(torch.stack((X0_y, y, y_X1), dim = 0))
 
-                y_est = model(torch.stack((X0, y, X1), dim = 0))
+            y_est = model(torch.stack((X0, y, X1), dim = 0))
 
-                # pixel loss (MSE with epsilon -- they call it "Charbonnier loss")
-                y_diff = y_est - y
-                pixel_loss = torch.mean(torch.sqrt(y_diff * y_diff + args.epsilon * args.epsilon))
+            # pixel loss (they call it "Charbonnier loss")
+            y_diff = y_est - y
+            pixel_loss = torch.mean(torch.sqrt(y_diff * y_diff + args.epsilon * args.epsilon))
 
-                # discriminator loss (we want it to be 1 = real)
-                discrim_out = discrim(y_est)
-                discrim_loss = bce_loss(discrim_out, d_real_label)
+            # FUNCTION to take 2 frames (1 real, 1 fake), shuffle them, and RETURN:
+            #     1. one 1x6xHxW tensor (both frames concatenated along 1 axis)
+            #     2. the label of the fake class, in one-hot form
+            def make_discrim_input(fake, real):
+                # shuffle the 2 frames and store the index
+                frames = [fake, real]
+                label = torch.ones(1, 1).cuda() * 0.1
 
-                total_loss = pixel_loss + 0.3 * discrim_loss
+                if (random.randint(0, 1)):
+                    frames = [real, fake]
+                    label = torch.ones(1, 1).cuda() * 0.9
 
-                total_loss.backward()
-                optimizer.step()
+                discrim_input = torch.cat(frames, dim = 1).cuda()
+
+                return discrim_input, label
+
+            # we send the triplet into the discriminator
+            discrim_input, fake_cls_lbl = make_discrim_input(y_est, X0)
+            discrim_out = discrim(discrim_input)
+
+            # we get the loss between the discriminator output and the OPPOSITE of 
+            # the fake class label (because we want to AVOID being detected as fake)
+            model_dsc_loss = nn.BCEWithLogitsLoss()(discrim_out, 1.0 - fake_cls_lbl)
+
+            total_loss = pixel_loss + 0.3 * model_dsc_loss
+
+            total_loss.backward()
+            optimizer.step()
 
             # --------------------------------------------
             #  train the discriminator
             # --------------------------------------------
             optimizer_discrim.zero_grad()
 
-            discrim_fake_out = discrim(y_est.detach())
-            discrim_fake_loss = bce_loss(discrim_fake_out, d_fake_label)
-            discrim_total_loss += (3.0 * discrim_fake_loss)
-            
-            for real_img in [X0, y, X1]:
-                discrim_real_out = discrim(real_img)
-                discrim_real_loss = bce_loss(discrim_real_out, d_real_label)
-                discrim_total_loss += discrim_real_loss               
+            discrim_input, fake_cls_lbl = make_discrim_input(y_est.detach(), X1)
 
-            discrim_total_loss /= 6.0
-            discrim_total_loss.backward()
+            discrim_out = discrim(discrim_input)
+            discrim_loss = nn.BCEWithLogitsLoss()(discrim_out, fake_cls_lbl)
+            discrim_loss.backward()
 
             optimizer_discrim.step()
 
@@ -337,9 +343,9 @@ def train():
                 print("Ep [" + str(t) +"/" + str(i) +
                                     "]\tl.r.: " + str(round(float(ikk['lr']),7))+
                                     "\tPix: " + str([round(pixel_loss.item(),5)]) +
-                                    "\tFool: " + str([round(discrim_loss.item(),5)]) +
+                                    "\tFool: " + str([round(model_dsc_loss.item(),5)]) +
                                     "\tTotal: " + str([round(x.item(),5) for x in [total_loss]]) +
-                                    "\tDiscrim: " + str([round(discrim_total_loss.item(),5)]) +
+                                    "\tDiscrim: " + str([round(discrim_loss.item(),5)]) +
                                     "\tAvg. Loss: " + str([round(training_losses.avg, 5)]))
 
         #if os.path.exists(args.save_path + "/epoch" + str(t-1) +".pth"):
@@ -350,9 +356,6 @@ def train():
         # print("\t\t**************Start Validation*****************")
 
         #Turn into evaluation mode
-
-        if (t < PRETRAINING_EPOCHS):
-            continue
 
         val_total_losses = AverageMeter()
         val_total_pixel_loss = AverageMeter()

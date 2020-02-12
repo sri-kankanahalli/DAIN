@@ -18,48 +18,99 @@ import networks
 from my_args import args, unique_id
 
 class Discriminator(nn.Module):
+    class ResidualBlock(nn.Module):
+        def __init__(self, nchans, downsample = False):
+            super(Discriminator.ResidualBlock, self).__init__()
+
+            self.downsample = downsample
+
+            self.conv1 = nn.Conv2d(nchans, nchans, kernel_size = 5, padding = 2)
+            self.relu = nn.LeakyReLU(0.3, inplace = True)
+
+            if (self.downsample):
+                self.conv2 = nn.Conv2d(nchans, nchans, kernel_size = 5, padding = 2, stride = 2)
+                self.dconv = nn.Conv2d(nchans, nchans, kernel_size = 5, padding = 2, stride = 2)
+            else:
+                self.conv2 = nn.Conv2d(nchans, nchans, kernel_size = 5, padding = 2)
+
+        def forward(self, x):
+            residual = x
+            if (self.downsample):
+                residual = self.dconv(residual)
+
+            out = self.conv1(x)
+            out = self.relu(out)
+            out = self.conv2(out)
+
+            out += residual
+            out = self.relu(out)
+
+            return out
+
     def __init__(self):
         super(Discriminator, self).__init__()
 
         # number of starting feature maps
-        ndf = 48
+        ndf = 32
+
+        '''
+        nn.Conv2d(ndf, ndf, kernel_size = 3, padding = 1, stride = 2),
+        nn.LeakyReLU(0.3, inplace = True),
+
+        nn.Conv2d(ndf, ndf, kernel_size = 3, padding = 1, stride = 2),
+        nn.LeakyReLU(0.3, inplace = True),
+
+        nn.Conv2d(ndf, ndf, kernel_size = 3, padding = 1, stride = 2),
+        nn.LeakyReLU(0.3, inplace = True),
+
+        nn.Conv2d(ndf, ndf, kernel_size = 3, padding = 1, stride = 2),
+        nn.LeakyReLU(0.3, inplace = True),
+
+        nn.Conv2d(ndf, ndf, kernel_size = 3, padding = 1, stride = 2),
+        nn.LeakyReLU(0.3, inplace = True),
+        '''
 
         self.main = nn.Sequential(
-            # input size: 3 x 192 x 128
-            nn.Conv2d(3, ndf, kernel_size = 4, stride = 2, padding = 1),
-            nn.LeakyReLU(0.3, inplace=True),
-            # after above: (ndf) x 96 x 64
-            nn.Conv2d(ndf, ndf * 2, kernel_size = 4, stride = 2, padding = 1),
-            nn.LeakyReLU(0.3, inplace=True),
-            # after above: (ndf*2) x 48 x 32
-            nn.Conv2d(ndf * 2, ndf * 4, kernel_size = 4, stride = 2, padding = 1),
-            nn.LeakyReLU(0.3, inplace=True),
-            # after above: (ndf*4) x 24 x 16
-            nn.Conv2d(ndf * 4, ndf * 8, kernel_size = 4, stride = 2, padding = 1),
-            nn.LeakyReLU(0.3, inplace=True),
-            # after above: (ndf*8) x 12 x 8
-            nn.Conv2d(ndf * 8, ndf * 16, kernel_size = 4, stride = 2, padding = 1),
-            nn.LeakyReLU(0.3, inplace=True),
-            # after above: (ndf*16) x 6 x 4
-            nn.Conv2d(ndf * 16, 1, kernel_size = 4, stride = 2, padding = 1),
-            nn.LeakyReLU(0.3, inplace=True),
-            # after above: 1 x 3 x 2
+            # input  = 9 x 192 x 128
+            nn.Conv2d(3, ndf, kernel_size = 5, padding = 2),
+            nn.LeakyReLU(0.3, inplace = True),
+            # output = (ndf) x 192 x 128
+
+            Discriminator.ResidualBlock(ndf, downsample = False),
+            Discriminator.ResidualBlock(ndf, downsample = False),
+            Discriminator.ResidualBlock(ndf, downsample = False),
+            Discriminator.ResidualBlock(ndf, downsample = False),
+
+            # input  = (ndf) x 192 x 128
+            Discriminator.ResidualBlock(ndf, downsample = True),
+            Discriminator.ResidualBlock(ndf, downsample = True),
+            Discriminator.ResidualBlock(ndf, downsample = True),
+            Discriminator.ResidualBlock(ndf, downsample = True),
+            Discriminator.ResidualBlock(ndf, downsample = True),
+            Discriminator.ResidualBlock(ndf, downsample = True),
+            # output = (ndf) x 6 x 4
+
+            # output = (ndf) x 6 x 4
+            nn.AdaptiveAvgPool2d((1, 1)),
+            # output = (ndf) x 1 x 1
+
+            # input = (ndf) x 1 x 1
             nn.Flatten(),
-            # after above: 6
-            nn.Linear(6, 1),
-            # after above: 1
+            # output = (ndf)
+
+            nn.Linear(ndf, 1),
             nn.Sigmoid()
         )
 
         # weight initialization function
         def init_weights(m):
             if type(m) == nn.Linear:
-                nn.init.normal(m.weight, 0.0, 0.05)
-                m.bias.data.fill_(0.01)
+                nn.init.normal(m.weight, 0.0, 0.1)
+                m.bias.data.fill_(0.0)
             elif type(m) == nn.Conv2d:
-                nn.init.normal(m.weight, 0.0, 0.05)
+                nn.init.normal(m.weight, 0.0, 0.1)
 
-        self.apply(init_weights)
+        #self.apply(init_weights)
 
 
     def forward(self, input):
@@ -71,7 +122,7 @@ def train():
     DATA_PATH = "./pixel_triplets/"
     BATCH_SIZE = 1
 
-    torch.manual_seed(2020)
+    torch.manual_seed(1337)
 
     # -------------------------------------
     #  load pre-trained model
@@ -180,11 +231,13 @@ def train():
     print("Num. of discriminator model parameters is:",
           count_network_parameters(discrim))
 
-    #exit(0)
-
     # -------------------------------------
     #  and heeere we go
     # -------------------------------------
+
+    # discriminator pretrains for a certain # of epochs
+    PRETRAINING_EPOCHS = 0
+
     training_losses = AverageMeter()
     auxiliary_data = []
     saved_total_loss = 10e10
@@ -195,69 +248,85 @@ def train():
             ikk = kk
             break
 
-    d_real_label = Variable(torch.ones(1,) - 0.1).cuda()
-    d_fake_label = Variable(torch.zeros(1,) + 0.1).cuda()
+    # one-sided label smoothing
+    d_real_label = Variable(torch.ones(1,)).cuda()
+    d_fake_label = Variable(torch.zeros(1,)).cuda()
 
     for t in range(args.numEpoch):
         print("The id of this in-training network is " + unique_id)
+
+        if (t < PRETRAINING_EPOCHS):
+            print("-- Discriminator pre-training epoch --")
+        elif (t == PRETRAINING_EPOCHS):
+            print("-- End discriminator pre-training --")
 
         #Turn into training mode
         model = model.train()
 
         for i, (X0_half, X1_half, y_half) in enumerate(train_loader):
-            if i >= 10: 
+            #if i >= 100:# 
+            if i >= int(len(train_set) / BATCH_SIZE):
                 break
 
             X0_half = X0_half.cuda()
             X1_half = X1_half.cuda()
             y_half = y_half.cuda()
 
-            X0 = Variable(X0_half, requires_grad= False)
-            X1 = Variable(X1_half, requires_grad= False)
-            y  = Variable(y_half,requires_grad= False)
+            X0 = Variable(X0_half, requires_grad = False)
+            X1 = Variable(X1_half, requires_grad = False)
+            y  = Variable(y_half,requires_grad = False)
+
+            discrim_total_loss = Variable(torch.zeros(1, 1)).cuda()
 
             # --------------------------------------------
-            #  first, train the interpolation network
+            #  train the interpolation network
             # --------------------------------------------
-            optimizer.zero_grad()
+            pixel_loss = torch.zeros(1,)
+            discrim_loss = torch.zeros(1,)
+            total_loss = torch.zeros(1,)
 
-            # comment out cycle stuff for now
-            #X0_y = model(torch.stack((X0, y, y), dim = 0))
-            #y_X1 = model(torch.stack((y, X1, X1), dim = 0))
-            #y_est = model(torch.stack((X0_y, y, y_X1), dim = 0))
+            # first few epochs are discriminator pre-training
+            if (t >= PRETRAINING_EPOCHS):
+                optimizer.zero_grad()
 
-            y_est = model(torch.stack((X0, y, X1), dim = 0))
+                # comment out cycle stuff for now
+                #X0_y = model(torch.stack((X0, y, y), dim = 0))
+                #y_X1 = model(torch.stack((y, X1, X1), dim = 0))
+                #y_est = model(torch.stack((X0_y, y, y_X1), dim = 0))
 
-            # pixel loss (MSE with epsilon -- they call it "Charbonnier loss")
-            y_diff = y_est - y
-            #pixel_loss = torch.mean(torch.abs(y_diff))
-            pixel_loss = torch.mean(torch.sqrt(y_diff * y_diff + args.epsilon * args.epsilon))
+                y_est = model(torch.stack((X0, y, X1), dim = 0))
 
-            # discriminator loss (we want it to be 1 = real)
-            discrim_out = discrim(y_est)
-            discrim_loss = bce_loss(discrim_out, d_real_label)
+                # pixel loss (MSE with epsilon -- they call it "Charbonnier loss")
+                y_diff = y_est - y
+                pixel_loss = torch.mean(torch.sqrt(y_diff * y_diff + args.epsilon * args.epsilon))
 
-            total_loss = pixel_loss + 0.3 * discrim_loss
+                # discriminator loss (we want it to be 1 = real)
+                discrim_out = discrim(y_est)
+                discrim_loss = bce_loss(discrim_out, d_real_label)
 
-            total_loss.backward()
-            optimizer.step()
+                total_loss = pixel_loss + 0.3 * discrim_loss
+
+                total_loss.backward()
+                optimizer.step()
 
             # --------------------------------------------
-            #  then, train the discriminator
+            #  train the discriminator
             # --------------------------------------------
+            optimizer_discrim.zero_grad()
+
+            discrim_fake_out = discrim(y_est.detach())
+            discrim_fake_loss = bce_loss(discrim_fake_out, d_fake_label)
+            discrim_total_loss += (3.0 * discrim_fake_loss)
+            
             for real_img in [X0, y, X1]:
-                optimizer_discrim.zero_grad()
-
                 discrim_real_out = discrim(real_img)
                 discrim_real_loss = bce_loss(discrim_real_out, d_real_label)
+                discrim_total_loss += discrim_real_loss               
 
-                discrim_fake_out = discrim(y_est.detach())
-                discrim_fake_loss = bce_loss(discrim_fake_out, d_fake_label)
+            discrim_total_loss /= 6.0
+            discrim_total_loss.backward()
 
-                discrim_total_loss = 0.5 * discrim_real_loss + 0.5 * discrim_fake_loss
-                discrim_total_loss.backward()
-
-                optimizer_discrim.step()
+            optimizer_discrim.step()
 
             # --------------------------------------------
             #  finally, output some stuff
@@ -273,17 +342,17 @@ def train():
                                     "\tDiscrim: " + str([round(discrim_total_loss.item(),5)]) +
                                     "\tAvg. Loss: " + str([round(training_losses.avg, 5)]))
 
-        if t == 1:
-            # delete the pre validation weights for cleaner workspace
-            if os.path.exists(args.save_path + "/epoch" + str(0) +".pth" ):
-                os.remove(args.save_path + "/epoch" + str(0) +".pth")
+        #if os.path.exists(args.save_path + "/epoch" + str(t-1) +".pth"):
+        #    os.remove(args.save_path + "/epoch" + str(t-1) +".pth")
 
-        if os.path.exists(args.save_path + "/epoch" + str(t-1) +".pth"):
-            os.remove(args.save_path + "/epoch" + str(t-1) +".pth")
         torch.save(model.state_dict(), args.save_path + "/epoch" + str(t) +".pth")
 
         # print("\t\t**************Start Validation*****************")
+
         #Turn into evaluation mode
+
+        if (t < PRETRAINING_EPOCHS):
+            continue
 
         val_total_losses = AverageMeter()
         val_total_pixel_loss = AverageMeter()

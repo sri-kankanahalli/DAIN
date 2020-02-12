@@ -24,7 +24,7 @@ model = networks.DAIN(channel = 3,
 
 model = model.cuda()
 
-WEIGHTS_PATH = './model_weights/epoch10.pth'
+WEIGHTS_PATH = './model_weights/epoch5.pth'
 
 if os.path.exists(WEIGHTS_PATH):
     pretrained_dict = torch.load(WEIGHTS_PATH)
@@ -49,9 +49,17 @@ dataset_dir = "./pixel_triplets"
 
 random.seed(1337)
 
-img_list = pixel_triplets_dataset.load_text_file(dataset_dir, "tri_trainlist.txt")
+img_list = pixel_triplets_dataset.load_text_file(dataset_dir, "tri_vallist.txt")
 
-img_path = img_list[40]
+#for i in range(0, len(img_list)):
+#    if 'captain' in img_list[i]:
+#        print(i, img_list[i])
+#exit(0)
+
+# 7 is captain commando
+# 172 is ken
+
+img_path = img_list[7]
 
 X0, X2, y = pixel_triplets_dataset.pixel_triplets_loader(dataset_dir, img_path, data_aug = False)
 

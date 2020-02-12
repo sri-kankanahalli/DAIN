@@ -17,14 +17,14 @@ from PIL import Image, ImageChops
 
 torch.backends.cudnn.benchmark = True
 
-model = networks.__dict__['DAIN'](channel = 3,
-                            filter_size = 4,
-                            timestep = 0.5,
-                            training = False)
+model = networks.DAIN(channel = 3,
+                      filter_size = 4,
+                      timestep = 0.5,
+                      training = False)
 
 model = model.cuda()
 
-WEIGHTS_PATH = './model_weights/pretrained.pth'
+WEIGHTS_PATH = './model_weights/epoch27.pth'
 
 if os.path.exists(WEIGHTS_PATH):
     pretrained_dict = torch.load(WEIGHTS_PATH)
@@ -51,7 +51,7 @@ random.seed(1337)
 
 img_list = pixel_triplets_dataset.load_text_file(dataset_dir, "tri_trainlist.txt")
 
-img_path = img_list[14]
+img_path = img_list[40]
 
 X0, X2, y = pixel_triplets_dataset.pixel_triplets_loader(dataset_dir, img_path, data_aug = False)
 

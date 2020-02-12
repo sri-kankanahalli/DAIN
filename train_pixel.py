@@ -303,12 +303,22 @@ def train():
             model_dsc_labels = [d_real_label, d_real_label, d_real_label]
             model_dsc_labels = torch.cat(model_dsc_labels, dim = 0)
 
+            #model_dsc_loss = torch.zeros(1,)
             model_dsc_loss = nn.BCELoss()(discrim(model_dsc_input), model_dsc_labels)
 
             total_loss = model_pixel_loss + 0.5 * model_dsc_loss
 
+            #before_mod = sum([torch.mean(p) for p in model.parameters()]).item()
+            #before_dsc = sum([torch.mean(p) for p in discrim.parameters()]).item()
+
             total_loss.backward()
             optimizer.step()
+
+            #after_mod = sum([torch.mean(p) for p in model.parameters()]).item()
+            #after_dsc = sum([torch.mean(p) for p in discrim.parameters()]).item()
+
+            #print("Model pass:", abs(before_dsc - after_dsc), abs(before_mod - after_mod))
+           
 
             # --------------------------------------------
             #  train the discriminator
@@ -325,17 +335,26 @@ def train():
                 (yX1_est, d_fake_label),
             ]
 
-            batch = [im.detach() for im, label in im_label_pairs]
+            batch = [im for im, label in im_label_pairs]
             batch = torch.cat(batch, dim = 0)
 
             labels = [label for im, label in im_label_pairs]
             labels = torch.cat(labels, dim = 0)
 
             discrim_loss = nn.BCELoss()(discrim(batch), labels)
-            discrim_loss.backward()
 
+            #before_mod = sum([torch.mean(p) for p in model.parameters()]).item()
+            #before_dsc = sum([torch.mean(p) for p in discrim.parameters()]).item()
+
+            discrim_loss.backward()
             optimizer_discrim.step()
 
+            #after_mod = sum([torch.mean(p) for p in model.parameters()]).item()
+            #after_dsc = sum([torch.mean(p) for p in discrim.parameters()]).item()
+
+            #print("Discrim pass:", abs(before_dsc - after_dsc), abs(before_mod - after_mod))
+
+            
             # --------------------------------------------
             #  finally, output some stuff
             # --------------------------------------------

@@ -19,34 +19,41 @@ import numpy as np
 from my_args import args, unique_id
 
 
-
 class Discriminator(nn.Module):
     class ResidualBlock(nn.Module):
-        def __init__(self, nchans, downsample = False):
+        def __init__(self, in_chans, out_chans, downsample = False, dilation = 1):
             super(Discriminator.ResidualBlock, self).__init__()
 
-            self.downsample = downsample
+            kernel_size = 3
+            padding_amt = dilation * (kernel_size - 1) // 2
 
-            self.conv1 = nn.Conv2d(nchans, nchans, kernel_size = 3, padding = 1)
-            self.relu = nn.LeakyReLU(0.3, inplace = True)
+            self.conv1 = nn.Conv2d(in_chans, out_chans, kernel_size = kernel_size,
+                                   padding = padding_amt, dilation = dilation,
+                                   stride = 2 if downsample else 1)
+            self.conv2 = nn.Conv2d(out_chans, out_chans, kernel_size = kernel_size,
+                                   padding = padding_amt, dilation = dilation)
 
-            if (self.downsample):
-                self.conv2 = nn.Conv2d(nchans, nchans, kernel_size = 3, padding = 1, stride = 2)
-                self.dconv = nn.Conv2d(nchans, nchans, kernel_size = 3, padding = 1, stride = 2)
-            else:
-                self.conv2 = nn.Conv2d(nchans, nchans, kernel_size = 3, padding = 1)
+            # all convs share a common ReLU unit. why? literally no reason. i just kinda feel like it
+            self.relu = nn.LeakyReLU(0.3)
+
+            self.shortcut_conv = None
+            if (downsample or in_chans != out_chans):
+                self.shortcut_conv = nn.Conv2d(in_chans, out_chans, kernel_size = kernel_size,
+                                               padding = padding_amt, dilation = dilation,
+                                               stride = 2 if downsample else 1)
 
         def forward(self, x):
             residual = x
-            if (self.downsample):
-                residual = self.dconv(residual)
+            if (self.shortcut_conv is not None):
+                residual = self.shortcut_conv(residual)
+                residual = self.relu(residual)
 
             out = self.conv1(x)
             out = self.relu(out)
             out = self.conv2(out)
+            out = self.relu(out)
 
             out += residual
-            out = self.relu(out)
 
             return out
 
@@ -54,46 +61,23 @@ class Discriminator(nn.Module):
         super(Discriminator, self).__init__()
 
         # number of starting feature maps
-        ndf = 16
-
-        '''
-        nn.Conv2d(ndf, ndf, kernel_size = 3, padding = 1, stride = 2),
-        nn.LeakyReLU(0.3, inplace = True),
-
-        nn.Conv2d(ndf, ndf, kernel_size = 3, padding = 1, stride = 2),
-        nn.LeakyReLU(0.3, inplace = True),
-
-        nn.Conv2d(ndf, ndf, kernel_size = 3, padding = 1, stride = 2),
-        nn.LeakyReLU(0.3, inplace = True),
-
-        nn.Conv2d(ndf, ndf, kernel_size = 3, padding = 1, stride = 2),
-        nn.LeakyReLU(0.3, inplace = True),
-
-        nn.Conv2d(ndf, ndf, kernel_size = 3, padding = 1, stride = 2),
-        nn.LeakyReLU(0.3, inplace = True),
-        '''
+        ndf = 32
 
         self.main = nn.Sequential(
-            # input  = 6 x 192 x 128 (two images smushed together)
-            nn.Conv2d(6, ndf, kernel_size = 5, padding = 2),
-            nn.LeakyReLU(0.3, inplace = True),
+            # input  = 3 x 192 x 128
+            Discriminator.ResidualBlock(3, ndf),
             # output = (ndf) x 192 x 128
 
-            #Discriminator.ResidualBlock(ndf, downsample = False),
-            #Discriminator.ResidualBlock(ndf, downsample = False),
-            Discriminator.ResidualBlock(ndf, downsample = False),
-            Discriminator.ResidualBlock(ndf, downsample = False),
+            # input  = (ndf) x 192 x 128
+            Discriminator.ResidualBlock(ndf, ndf, dilation = 1),
+            Discriminator.ResidualBlock(ndf, ndf, dilation = 2),
+            Discriminator.ResidualBlock(ndf, ndf, dilation = 4),
+            Discriminator.ResidualBlock(ndf, ndf, dilation = 8),
+            Discriminator.ResidualBlock(ndf, ndf, dilation = 16),
+            Discriminator.ResidualBlock(ndf, ndf, dilation = 32),
+            # output = (ndf) x 192 x 128
 
             # input  = (ndf) x 192 x 128
-            Discriminator.ResidualBlock(ndf, downsample = True),
-            Discriminator.ResidualBlock(ndf, downsample = True),
-            Discriminator.ResidualBlock(ndf, downsample = True),
-            Discriminator.ResidualBlock(ndf, downsample = True),
-            Discriminator.ResidualBlock(ndf, downsample = True),
-            Discriminator.ResidualBlock(ndf, downsample = True),
-            # output = (ndf) x 6 x 4
-
-            # output = (ndf) x 6 x 4
             nn.AdaptiveAvgPool2d((1, 1)),
             # output = (ndf) x 1 x 1
 
@@ -101,8 +85,8 @@ class Discriminator(nn.Module):
             nn.Flatten(),
             # output = (ndf)
 
-            nn.Linear(ndf, 1)
-            # sigmoid is taken care of by loss function
+            nn.Linear(ndf, 1),
+            nn.Sigmoid()
         )
 
         # weight initialization function
@@ -251,6 +235,11 @@ def train():
     d_real_label = Variable(torch.ones(1,)).cuda()
     d_fake_label = Variable(torch.zeros(1,)).cuda()
 
+    def charbonnier_loss(y_est, y):
+        y_diff = y_est - y
+        pixel_loss = torch.mean(torch.sqrt(y_diff * y_diff + args.epsilon * args.epsilon))
+        return pixel_loss
+
     for t in range(args.numEpoch):
         print("The id of this in-training network is " + unique_id)
 
@@ -261,6 +250,9 @@ def train():
             #if i >= 100:# 
             if i >= int(len(train_set) / BATCH_SIZE):
                 break
+
+            #if i >= 500:
+            #    break
 
             X0_half = X0_half.cuda()
             X1_half = X1_half.cuda()
@@ -281,42 +273,39 @@ def train():
 
             optimizer.zero_grad()
 
-            # comment out cycle stuff for now
-            #X0_y = model(torch.stack((X0, y, y), dim = 0))
-            #y_X1 = model(torch.stack((y, X1, X1), dim = 0))
-            #y_est = model(torch.stack((X0_y, y, y_X1), dim = 0))
+            # model forward pass
+            model_input = torch.cat((
+                torch.stack((X0, y, X1), dim = 0),
+                torch.stack((X0, y, y), dim = 0),
+                torch.stack((y, y, X1), dim = 0)
+            ), dim = 1)
+            model_output = model(model_input)
 
-            y_est = model(torch.stack((X0, y, X1), dim = 0))
+            # estimated: X0 => X1
+            y_est = model_output[0:1, :]
 
-            # pixel loss (they call it "Charbonnier loss")
-            y_diff = y_est - y
-            pixel_loss = torch.mean(torch.sqrt(y_diff * y_diff + args.epsilon * args.epsilon))
+            # estimated: X0 => y
+            X0y_est = model_output[1:2, :]
 
-            # FUNCTION to take 2 frames (1 real, 1 fake), shuffle them, and RETURN:
-            #     1. one 1x6xHxW tensor (both frames concatenated along 1 axis)
-            #     2. the label of the fake class, in one-hot form
-            def make_discrim_input(fake, real):
-                # shuffle the 2 frames and store the index
-                frames = [fake, real]
-                label = torch.ones(1, 1).cuda() * 0.1
+            # estimated: y => X1
+            yX1_est = model_output[2:3, :]
 
-                if (random.randint(0, 1)):
-                    frames = [real, fake]
-                    label = torch.ones(1, 1).cuda() * 0.9
+            # estimated: X0' => X1'
+            #y_cyc_est = model(torch.stack((X0y_est, X0y_est, yX1_est), dim = 0))
 
-                discrim_input = torch.cat(frames, dim = 1).cuda()
+            # pixel losses (sqrt MSE with epsilon -- they call it "Charbonnier loss")
+            model_pixel_loss = charbonnier_loss(y_est, y)
 
-                return discrim_input, label
+            # discriminator pass (we want all to be 1 = real)
+            model_dsc_input = [y_est, X0y_est, yX1_est]
+            model_dsc_input = torch.cat(model_dsc_input, dim = 0)
 
-            # we send the triplet into the discriminator
-            discrim_input, fake_cls_lbl = make_discrim_input(y_est, X0)
-            discrim_out = discrim(discrim_input)
+            model_dsc_labels = [d_real_label, d_real_label, d_real_label]
+            model_dsc_labels = torch.cat(model_dsc_labels, dim = 0)
 
-            # we get the loss between the discriminator output and the OPPOSITE of 
-            # the fake class label (because we want to AVOID being detected as fake)
-            model_dsc_loss = nn.BCEWithLogitsLoss()(discrim_out, 1.0 - fake_cls_lbl)
+            model_dsc_loss = nn.BCELoss()(discrim(model_dsc_input), model_dsc_labels)
 
-            total_loss = pixel_loss + 0.3 * model_dsc_loss
+            total_loss = model_pixel_loss + 0.5 * model_dsc_loss
 
             total_loss.backward()
             optimizer.step()
@@ -326,10 +315,23 @@ def train():
             # --------------------------------------------
             optimizer_discrim.zero_grad()
 
-            discrim_input, fake_cls_lbl = make_discrim_input(y_est.detach(), X1)
+            im_label_pairs = [
+                (X0, d_real_label),
+                (y, d_real_label),
+                (X1, d_real_label),
 
-            discrim_out = discrim(discrim_input)
-            discrim_loss = nn.BCEWithLogitsLoss()(discrim_out, fake_cls_lbl)
+                (X0y_est, d_fake_label),
+                (y_est, d_fake_label),
+                (yX1_est, d_fake_label),
+            ]
+
+            batch = [im.detach() for im, label in im_label_pairs]
+            batch = torch.cat(batch, dim = 0)
+
+            labels = [label for im, label in im_label_pairs]
+            labels = torch.cat(labels, dim = 0)
+
+            discrim_loss = nn.BCELoss()(discrim(batch), labels)
             discrim_loss.backward()
 
             optimizer_discrim.step()
@@ -342,7 +344,7 @@ def train():
 
                 print("Ep [" + str(t) +"/" + str(i) +
                                     "]\tl.r.: " + str(round(float(ikk['lr']),7))+
-                                    "\tPix: " + str([round(pixel_loss.item(),5)]) +
+                                    "\tPix: " + str([round(model_pixel_loss.item(),5)]) +
                                     "\tFool: " + str([round(model_dsc_loss.item(),5)]) +
                                     "\tTotal: " + str([round(x.item(),5) for x in [total_loss]]) +
                                     "\tDiscrim: " + str([round(discrim_loss.item(),5)]) +

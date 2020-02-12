@@ -24,7 +24,7 @@ model = networks.DAIN(channel = 3,
 
 model = model.cuda()
 
-WEIGHTS_PATH = './model_weights/epoch27.pth'
+WEIGHTS_PATH = './model_weights/epoch10.pth'
 
 if os.path.exists(WEIGHTS_PATH):
     pretrained_dict = torch.load(WEIGHTS_PATH)

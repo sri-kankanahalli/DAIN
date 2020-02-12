@@ -68,10 +68,12 @@ parser.add_argument('--force', action='store_true', help='force to override the 
 
 args = parser.parse_args()
 
+
 import shutil
 
+unique_id = str(numpy.random.randint(0, 100000))
+
 if args.uid == None:
-    unique_id = str(numpy.random.randint(0, 100000))
     print("revise the unique id to a random numer " + str(unique_id))
     args.uid = unique_id
     timestamp = datetime.datetime.now().strftime("%a-%b-%d-%H:%M")

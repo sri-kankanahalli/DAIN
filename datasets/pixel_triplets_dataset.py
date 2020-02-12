@@ -74,6 +74,7 @@ def pixel_triplets_loader(root, im_path, data_aug = True):
 
         # --------------------------------------------
         #  finally, do all the technical Numpy conversion shit
+        #      final output is 3xWxH
         # --------------------------------------------
         X0 = np.asarray(im_before).transpose((2, 0, 1))
         X2 = np.asarray(im_after).transpose((2, 0, 1))

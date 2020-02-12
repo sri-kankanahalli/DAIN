@@ -1,5 +1,6 @@
 import sys
 import os
+import random
 
 import threading
 import torch
@@ -14,37 +15,38 @@ from loss_function import *
 import datasets
 import balancedsampler
 import networks
-from my_args import args
+from my_args import args, unique_id
 
 class Discriminator(nn.Module):
     def __init__(self):
         super(Discriminator, self).__init__()
 
         # number of starting feature maps
-        ndf = 32
+        ndf = 48
 
         self.main = nn.Sequential(
             # input size: 3 x 192 x 128
-            nn.Conv2d(3, ndf, kernel_size = 4, stride = 2, padding = 1, bias = False),
-            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(3, ndf, kernel_size = 4, stride = 2, padding = 1),
+            nn.LeakyReLU(0.3, inplace=True),
             # after above: (ndf) x 96 x 64
-            nn.Conv2d(ndf, ndf * 2, kernel_size = 4, stride = 2, padding = 1, bias=False),
-            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(ndf, ndf * 2, kernel_size = 4, stride = 2, padding = 1),
+            nn.LeakyReLU(0.3, inplace=True),
             # after above: (ndf*2) x 48 x 32
-            nn.Conv2d(ndf * 2, ndf * 4, kernel_size = 4, stride = 2, padding = 1, bias=False),
-            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(ndf * 2, ndf * 4, kernel_size = 4, stride = 2, padding = 1),
+            nn.LeakyReLU(0.3, inplace=True),
             # after above: (ndf*4) x 24 x 16
-            nn.Conv2d(ndf * 4, ndf * 8, kernel_size = 4, stride = 2, padding = 1, bias=False),
-            nn.LeakyReLU(0.2, inplace=True),
-            # after above: (ndf*8) x 24 x 16
-            nn.Conv2d(ndf * 8, ndf * 16, kernel_size = 4, stride = 2, padding = 1, bias=False),
-            nn.LeakyReLU(0.2, inplace=True),
-            # after above: (ndf*16) x 12 x 8
-            nn.Conv2d(ndf * 16, 1, kernel_size = 4, stride = 2, padding = 1, bias=False),
-            # after above: 1 x 6 x 4
+            nn.Conv2d(ndf * 4, ndf * 8, kernel_size = 4, stride = 2, padding = 1),
+            nn.LeakyReLU(0.3, inplace=True),
+            # after above: (ndf*8) x 12 x 8
+            nn.Conv2d(ndf * 8, ndf * 16, kernel_size = 4, stride = 2, padding = 1),
+            nn.LeakyReLU(0.3, inplace=True),
+            # after above: (ndf*16) x 6 x 4
+            nn.Conv2d(ndf * 16, 1, kernel_size = 4, stride = 2, padding = 1),
+            nn.LeakyReLU(0.3, inplace=True),
+            # after above: 1 x 3 x 2
             nn.Flatten(),
-            # after above: 24
-            nn.Linear(24, 1),
+            # after above: 6
+            nn.Linear(6, 1),
             # after above: 1
             nn.Sigmoid()
         )
@@ -52,10 +54,10 @@ class Discriminator(nn.Module):
         # weight initialization function
         def init_weights(m):
             if type(m) == nn.Linear:
-                nn.init.xavier_uniform(m.weight)
+                nn.init.normal(m.weight, 0.0, 0.05)
                 m.bias.data.fill_(0.01)
             elif type(m) == nn.Conv2d:
-                nn.init.normal(m.weight, 0.0, 0.02)
+                nn.init.normal(m.weight, 0.0, 0.05)
 
         self.apply(init_weights)
 
@@ -100,6 +102,10 @@ def train():
     discrim = Discriminator()
     discrim = discrim.cuda()
 
+    # discriminator optimizer and loss
+    optimizer_discrim = torch.optim.Adam(discrim.parameters(), lr = 0.001)
+    bce_loss = torch.nn.BCELoss()
+
     # -------------------------------------
     #  create dataset loaders
     # -------------------------------------
@@ -132,10 +138,6 @@ def train():
                 lr=args.lr, betas=(0.9, 0.999), eps=1e-8, weight_decay=args.weight_decay)
 
     scheduler = ReduceLROnPlateau(optimizer, 'min',factor=args.factor, patience=args.patience,verbose=True)
-
-    # discriminator optimizer and loss
-    optimizer_discrim = torch.optim.Adam(discrim.parameters(), lr = 0.0005)
-    loss_discrim = torch.nn.BCELoss()
 
     # -------------------------------------
     #  print out some info before we start
@@ -178,7 +180,7 @@ def train():
     print("Num. of discriminator model parameters is:",
           count_network_parameters(discrim))
 
-    exit(0)
+    #exit(0)
 
     # -------------------------------------
     #  and heeere we go
@@ -193,8 +195,11 @@ def train():
             ikk = kk
             break
 
+    d_real_label = Variable(torch.ones(1,) - 0.1).cuda()
+    d_fake_label = Variable(torch.zeros(1,) + 0.1).cuda()
+
     for t in range(args.numEpoch):
-        print("The id of this in-training network is " + str(args.uid))
+        print("The id of this in-training network is " + unique_id)
 
         #Turn into training mode
         model = model.train()
@@ -211,28 +216,62 @@ def train():
             X1 = Variable(X1_half, requires_grad= False)
             y  = Variable(y_half,requires_grad= False)
 
+            # --------------------------------------------
+            #  first, train the interpolation network
+            # --------------------------------------------
+            optimizer.zero_grad()
+
+            # comment out cycle stuff for now
             #X0_y = model(torch.stack((X0, y, y), dim = 0))
             #y_X1 = model(torch.stack((y, X1, X1), dim = 0))
             #y_est = model(torch.stack((X0_y, y, y_X1), dim = 0))
+
             y_est = model(torch.stack((X0, y, X1), dim = 0))
 
+            # pixel loss (MSE with epsilon -- they call it "Charbonnier loss")
             y_diff = y_est - y
+            #pixel_loss = torch.mean(torch.abs(y_diff))
             pixel_loss = torch.mean(torch.sqrt(y_diff * y_diff + args.epsilon * args.epsilon))
 
-            total_loss = pixel_loss
+            # discriminator loss (we want it to be 1 = real)
+            discrim_out = discrim(y_est)
+            discrim_loss = bce_loss(discrim_out, d_real_label)
 
+            total_loss = pixel_loss + 0.3 * discrim_loss
+
+            total_loss.backward()
+            optimizer.step()
+
+            # --------------------------------------------
+            #  then, train the discriminator
+            # --------------------------------------------
+            for real_img in [X0, y, X1]:
+                optimizer_discrim.zero_grad()
+
+                discrim_real_out = discrim(real_img)
+                discrim_real_loss = bce_loss(discrim_real_out, d_real_label)
+
+                discrim_fake_out = discrim(y_est.detach())
+                discrim_fake_loss = bce_loss(discrim_fake_out, d_fake_label)
+
+                discrim_total_loss = 0.5 * discrim_real_loss + 0.5 * discrim_fake_loss
+                discrim_total_loss.backward()
+
+                optimizer_discrim.step()
+
+            # --------------------------------------------
+            #  finally, output some stuff
+            # --------------------------------------------
             training_losses.update(total_loss.item(), BATCH_SIZE)
             if i % max(1, int(int(len(train_set) / BATCH_SIZE) / 500.0)) == 0:
 
                 print("Ep [" + str(t) +"/" + str(i) +
                                     "]\tl.r.: " + str(round(float(ikk['lr']),7))+
                                     "\tPix: " + str([round(pixel_loss.item(),5)]) +
+                                    "\tFool: " + str([round(discrim_loss.item(),5)]) +
                                     "\tTotal: " + str([round(x.item(),5) for x in [total_loss]]) +
+                                    "\tDiscrim: " + str([round(discrim_total_loss.item(),5)]) +
                                     "\tAvg. Loss: " + str([round(training_losses.avg, 5)]))
-
-            optimizer.zero_grad()
-            total_loss.backward()
-            optimizer.step()
 
         if t == 1:
             # delete the pre validation weights for cleaner workspace
@@ -301,7 +340,7 @@ def train():
             print("\t\tWeights Not updated for undecreased validation loss\n")
 
         #schdule the learning rate
-        scheduler.step(val_total_losses.avg)
+        #scheduler.step(val_total_losses.avg)
 
 
     print("*********Finish Training********")

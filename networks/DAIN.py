@@ -102,7 +102,7 @@ class DAIN(torch.nn.Module):
         '''
             STEP 1: sequeeze the input 
         '''
-        if self.training == True:
+        if self.training == True and (not self.pixel_model):
             assert input.size(0) == 3
             input_0,input_1,input_2 = torch.squeeze(input,dim=0)
         else:
@@ -112,7 +112,7 @@ class DAIN(torch.nn.Module):
 
         #prepare the input data of current scale
         cur_input_0 = input_0
-        if self.training == True:
+        if self.training == True and (not self.pixel_model):
             cur_input_1 = input_1
         cur_input_2 =  input_2
 
@@ -177,6 +177,9 @@ class DAIN(torch.nn.Module):
         ),dim =1)
         cur_output_rectified = self.rectifyNet(rectify_input) + cur_output
 
+        if (self.pixel_model):
+            return cur_output_rectified
+
         '''
             STEP 3.5: for training phase, we collect the variables to be penalized.
         '''
@@ -188,8 +191,6 @@ class DAIN(torch.nn.Module):
         '''
             STEP 4: return the results
         '''
-        if (self.pixel_model):
-            return cur_output_rectified
 
         if self.training == True:
             # if in the training phase, we output the losses to be minimized.

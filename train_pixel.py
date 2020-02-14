@@ -228,7 +228,7 @@ def train():
     # -------------------------------------
 
     # discriminator pretrains for a certain # of epochs
-    PRETRAINING_EPOCHS = 1
+    PRETRAINING_EPOCHS = 0
 
     training_losses = AverageMeter()
     auxiliary_data = []
@@ -311,43 +311,30 @@ def train():
                     torch.stack((before, after), dim = 0),
                 ), dim = 1)
 
-            # first, predict the frames between X0 and y, y and X1. as well as
-            # the "direct" prediction of X0 to X1, y_est_direct
-            model_input = torch.cat((
-                torch.stack((X0, y),  dim = 0),
-                torch.stack((y, X1),  dim = 0),
-                torch.stack((X0, X1), dim = 0)
-            ), dim = 1)
+            # predict the frame between X0 and y
+            model_input = torch.stack((X0, X1), dim = 0)
             model_output = model(model_input)
 
-            X0_to_y_est  = model_output[0:1]
-            y_to_X1_est  = model_output[1:2]
-            y_est_direct = model_output[2:3]
+            y_est = model_output[0:1]
 
-            # interpolate between predicted frames to create y_est_cycle
-            model_input = torch.stack((X0_to_y_est, y_to_X1_est), dim = 0)
-            model_output = model(model_input)
-            y_est_cycle = model_output[0:1, :]
-
-            # create fake batch
-            fake_batch = torch.cat([
-                X0_to_y_est, y_est_cycle, y_est_direct, y_to_X1_est
-            ], dim = 0)
+            # concatenate real and fake so we can do everything in two forward passes
+            discrim_batch = torch.cat((
+                y.detach(),
+                y_est.detach()
+            ), dim = 0)
 
             if (t >= PRETRAINING_EPOCHS):
                 # pixel losses
-                #     we minimize 2 distances: y_est_cycle to y
-                #                              y_est_direct to y
-                # we use sqrt MSE with epsilon -- they call it "Charbonnier loss"
-                model_pixel_loss = 0.5 * charbonnier_loss(y_est_cycle, y) + \
-                                   0.5 * charbonnier_loss(y_est_direct, y)
+                model_pixel_loss = charbonnier_loss(y_est, y)
 
-                # discriminator loss
-                #     we want all 4 fake frames to be predicted as real
-                fake_pred_labels = discrim(fake_batch)
-                model_dsc_loss = loss_function(fake_pred_labels, g_label_target)
+                # discriminator losses
+                C_y, C_y_est = discrim(discrim_batch)
 
-                total_loss = model_pixel_loss + 0.025 * model_dsc_loss
+                # RaLSGAN loss. what is it minimizing? uhhh i don't fucking know man
+                C_diff = ((C_y - C_y_est - 1.0) ** 2 + (C_y_est - C_y + 1.0) ** 2) / 2.0
+                model_dsc_loss = C_diff
+
+                total_loss = model_pixel_loss + 0.01 * model_dsc_loss
 
                 total_loss.backward()
                 optimizer.step()
@@ -357,13 +344,11 @@ def train():
             # --------------------------------------------
             optimizer_discrim.zero_grad()
 
-            # concatenate real and fake so we can do everything in one forward pass
-            discrim_batch = torch.cat((
-                X0.detach(), y.detach(), y.detach(), X1.detach(),
-                fake_batch.detach()
-            ), dim = 0)
-            discrim_pred_labels = discrim(discrim_batch)
-            discrim_loss = loss_function(discrim_pred_labels, d_label_target)
+            C_y, C_y_est = discrim(discrim_batch)
+
+            # discriminator's RaLSGAN loss is the reverse of the generator's
+            C_diff = ((C_y_est - C_y - 1.0) ** 2 + (C_y - C_y_est + 1.0) ** 2) / 2.0
+            discrim_loss = C_diff
 
             discrim_loss.backward()
             optimizer_discrim.step()
